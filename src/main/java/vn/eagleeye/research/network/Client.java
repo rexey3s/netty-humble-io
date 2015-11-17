@@ -71,7 +71,6 @@ public class Client {
         final PixelFormat.Type pixelformat = PixelFormat.Type.PIX_FMT_YUV420P;
         encoder.setPixelFormat(pixelformat);
         encoder.setTimeBase(framerate);
-
         /** An annoynace of some formats is that they need global (rather than per-stream) headers,
          * and in that case you have to tell the encoder. And since Encoders are decoupled from
          * Muxers, there is no easy way to know this beyond
