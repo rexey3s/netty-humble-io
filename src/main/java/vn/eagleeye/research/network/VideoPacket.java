@@ -26,4 +26,8 @@ public class VideoPacket implements Serializable{
         return data;
     }
 
+    enum DecoderState {
+        READ_LENGTH,
+        READ_CONTENT
+    }
 }

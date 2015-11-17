@@ -7,13 +7,14 @@ import io.humble.video.awt.MediaPictureConverter;
 import io.humble.video.awt.MediaPictureConverterFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInitializer;
-import io.netty.channel.ChannelPipeline;
+import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.ReplayingDecoder;
+import io.netty.handler.codec.bytes.ByteArrayDecoder;
 import org.apache.commons.lang3.SerializationUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +22,7 @@ import org.slf4j.LoggerFactory;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -137,36 +139,26 @@ public class Server {
                                 // Set units for the system time, which because we used System.nanoTime will be in nanoseconds.
                                 systemTimeBase = Rational.make(1, 1000000000);
                                 ctx.pipeline().remove(this);
+//                                final VideoPacketDecoder videoFrameDecoder = new VideoPacketDecoder();
 
-                                ctx.pipeline().addLast(new ByteToMessageDecoder() {
+                                ctx.pipeline().addLast("frameDecoder", new LengthFieldBasedFrameDecoder(1048576, 0, 4 ,0, 4));
+                                ctx.pipeline().addLast("bytesDecoder", new ByteArrayDecoder());
+                                ctx.pipeline().addLast(new SimpleChannelInboundHandler<byte[]>() {
                                     @Override
-                                    protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
-                                        logger.info("Decoding ... ");
+                                    protected void channelRead0(ChannelHandlerContext ctx, byte[] msg) throws Exception {
+                                        assert msg.length != 0;
+                                        logger.info("LENGTH {} RAW {}", msg.length, Arrays.toString(msg));
 
-                                        if(in.readableBytes() < 4) {
-                                            return;
-                                        }
-//                                int size = in.readInt();
-//                                logger.info("lenth: {}", size);
-                                        int size = in.readableBytes();
-                                        byte[] bytes = new byte[in.readableBytes()];
-                                        logger.info("Length: {}", size);
-                                        in.readBytes(bytes);
-
-                                        videoDecoder.decode(mediaPicture,MediaPacket.make(Buffer.make(null, bytes,0, size)),0);
+                                        videoDecoder.decode(mediaPicture,MediaPacket.make(Buffer.make(null, msg,0, msg.length)),0);
                                         displayVideoAtCorrectTime(streamStartTime, mediaPicture,
                                                 mediaPictureConverter, image, window, systemStartTime,
                                                 systemTimeBase,
                                                 streamTimebase);
-
-                                    }
-
-
-                                    @Override
-                                    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-                                        cause.printStackTrace();
                                     }
                                 });
+
+
+
                             }
                         });
 
@@ -177,8 +169,36 @@ public class Server {
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
+
+
     }
 
+    public static class VideoPacketDecoder extends ReplayingDecoder<VideoPacket.DecoderState> {
+        public int getLength() {
+            return length;
+        }
+
+        public int length;
+        public VideoPacketDecoder() {
+            super(VideoPacket.DecoderState.READ_LENGTH);
+        }
+        @Override
+        protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception {
+            switch (state()) {
+                case READ_LENGTH:
+                    length = in.readShort();
+                    logger.info("LENGTH: {}", length);
+                    checkpoint(VideoPacket.DecoderState.READ_CONTENT);
+                case READ_CONTENT:
+                    ByteBuf frame = in.readBytes(in.readableBytes());
+                    checkpoint(VideoPacket.DecoderState.READ_LENGTH);
+                    out.add(frame);
+                    break;
+                default:
+                    throw new Error("Shouldn't reach here.");
+            }
+        }
+    }
     public static void main(String[] args) throws AWTException, IOException {
 
         final Server server = new Server();
