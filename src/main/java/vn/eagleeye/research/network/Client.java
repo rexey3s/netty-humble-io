@@ -12,20 +12,16 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
-
-import java.awt.*;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.math.BigInteger;
-import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicLong;
-
 import io.netty.handler.codec.LengthFieldPrepender;
 import io.netty.handler.codec.bytes.ByteArrayEncoder;
 import org.apache.commons.lang3.SerializationUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.util.Arrays;
 
 
 /**
@@ -110,6 +106,7 @@ public class Client {
                 });
         PooledByteBufAllocator bufAllocator = new PooledByteBufAllocator(true);
         ChannelFuture f = b.connect(args[0], 9090);
+
         final VideoHeader videoHeader = new VideoHeader("h264",snapsPerSecond,encoder.getWidth(),encoder.getHeight(),pixelformat.toString());
         f.addListener(new ChannelFutureListener() {
             public void operationComplete(ChannelFuture f1) throws Exception {
