@@ -6,6 +6,7 @@ import io.humble.video.awt.MediaPictureConverterFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.DefaultByteBufHolder;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -15,8 +16,13 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
+
+import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.codec.bytes.ByteArrayEncoder;
 import org.apache.commons.lang3.SerializationUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,7 +87,7 @@ public class Client {
          * codecs use some variant of YCrCb formatting. So we're going to have to
          * convert. To do that, we'll introduce a MediaPictureConverter object later. object.
          */
-        final MediaPictureConverter converter = null;
+        MediaPictureConverter converter = null;
         final MediaPicture picture = MediaPicture.make(
                 encoder.getWidth(),
                 encoder.getHeight(),
@@ -99,14 +105,24 @@ public class Client {
                     @Override
                     protected void initChannel(SocketChannel socketChannel) throws Exception {
                         ChannelPipeline pipeline = socketChannel.pipeline();
+
+
                     }
                 });
-        final AtomicLong timestampAttr = new AtomicLong(0);
+        PooledByteBufAllocator bufAllocator = new PooledByteBufAllocator(true);
         ChannelFuture f = b.connect("127.0.0.1", 9090);
         final VideoHeader videoHeader = new VideoHeader("h264",snapsPerSecond,encoder.getWidth(),encoder.getHeight(),pixelformat.toString());
         f.addListener(new ChannelFutureListener() {
             public void operationComplete(ChannelFuture f1) throws Exception {
                 byte[] header = SerializationUtils.serialize(videoHeader);
+                final BufferedImage screenShot = robot.createScreenCapture(screenbounds);
+
+                final BufferedImage screen = convertToType(screenShot, BufferedImage.TYPE_3BYTE_BGR);
+
+                final MediaPictureConverter converter = MediaPictureConverterFactory.createConverter(screen, picture);
+
+                final PooledByteBufAllocator bufAllocator = new PooledByteBufAllocator(true);
+                final ByteBuf buffer = bufAllocator.directBuffer();
 
                 f1.channel().writeAndFlush(Unpooled.wrappedBuffer(header)).addListener(new ChannelFutureListener() {
 //
@@ -124,26 +140,30 @@ public class Client {
 //                                f2.channel().writeAndFlush(new VideoPacket(packet.getSize(), data));
 //                            }
 //                        } while (packet.isComplete());
+                        ChannelPipeline pipeline = f2.channel().pipeline();
+                        pipeline.addLast(new LengthFieldPrepender(4));
+                        pipeline.addLast(new ByteArrayEncoder());
                         long l=0,time;
                         while(true){
                             time = System.currentTimeMillis();
                             /** Make the screen capture && convert image to TYPE_3BYTE_BGR */
-                            final BufferedImage screenShot = robot.createScreenCapture(screenbounds);
 
-                            final BufferedImage screen = convertToType(screenShot, BufferedImage.TYPE_3BYTE_BGR);
                             /** This is LIKELY not in YUV420P format, so we're going to convert it using some handy utilities. */
-                            final MediaPictureConverter converter1 = MediaPictureConverterFactory.createConverter(screen, picture);
 
-                            converter1.toPicture(picture, screen, l++);
+                            converter.toPicture(picture, screen, l++);
+
                             do {
+
                                 encoder.encode(packet, picture);
                                 if (packet.isComplete()) {
+                                    logger.info("LENGTH: {}", packet.getSize());
+
 
 //                                    logger.info("length: {}", packet.getSize());
 //                                    out.writeBytes(ByteBuffer.allocateDirect(packet.getSize()));
-
-
-                                    f2.channel().writeAndFlush(Unpooled.wrappedBuffer(packet.getData().getByteArray(0,packet.getData().getSize())));
+                                    byte[] data = packet.getData().getByteArray(0, packet.getData().getSize());
+                                    logger.info("LENGTH OF ARR [{}] RAW {}", data.length, Arrays.toString(data));
+                                    f2.channel().writeAndFlush(data).await();
 
                                 }
                             } while (packet.isComplete());
@@ -201,5 +221,12 @@ public class Client {
         }
 
         return image;
+    }
+    public static final byte[] intToByteArray(int value) {
+        return new byte[] {
+                (byte)(value >>> 24),
+                (byte)(value >>> 16),
+                (byte)(value >>> 8),
+                (byte)value};
     }
 }
